@@ -321,22 +321,26 @@ def create_side_by_side_format(outlier_bookkeeping, outlier_statement):
                 statement_row = payer_statement.iloc[i]
                 row['Statement Description'] = statement_row['Description']
                 row['Statement Amount'] = statement_row['Amount']
+                row['Statement Credit'] = statement_row['Credit']
             else:
                 row['Statement Description'] = ''
                 row['Statement Amount'] = ''
+                row['Statement Credit'] = ''
             
             report_data.append(row)
         
         # Add total row for this payer
         bookkeeping_total = payer_bookkeeping['Amount'].sum() if len(payer_bookkeeping) > 0 else 0
         statement_total = payer_statement['Amount'].sum() if len(payer_statement) > 0 else 0
+        statement_credit = payer_statement['Credit'].sum() if len(payer_statement) > 0 else 0
         
         total_row = {
             'Payer': '',
             'Bookkeeping Description': 'Total',
             'Bookkeeping Amount': f'£{bookkeeping_total:.2f}' if bookkeeping_total != 0 else '',
             'Statement Description': 'Total',
-            'Statement Amount': f'£{statement_total:.2f}' if statement_total != 0 else ''
+            'Statement Amount': f'£{statement_total:.2f}' if statement_total != 0 else '',
+            'Statement Credit': f'£{statement_credit:.2f}' if statement_credit != 0 else ''
         }
         report_data.append(total_row)
         
@@ -347,7 +351,8 @@ def create_side_by_side_format(outlier_bookkeeping, outlier_statement):
                 'Bookkeeping Description': '',
                 'Bookkeeping Amount': '',
                 'Statement Description': '',
-                'Statement Amount': ''
+                'Statement Amount': '',
+                'Statement Credit': ''
             }
             report_data.append(empty_row)
     
@@ -490,7 +495,7 @@ def main():
         
         # Step 3: Load data from separate workbooks
         bookkeeping_columns = ['Payer', 'Description', 'Signed Total Amount']
-        statement_columns = ['Payer', 'Description', 'Debit']
+        statement_columns = ['Payer', 'Description', 'Debit', 'Credit']
         
         bookkeeping_df = load_workbook_data(bookkeeping_path, 'Bookkeeping', bookkeeping_columns)
         statement_df = load_workbook_data(statement_path, 'Statement', statement_columns)
