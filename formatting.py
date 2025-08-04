@@ -2,7 +2,6 @@ import os
 import pandas as pd
 from datetime import datetime
 
-
 def clean_csv_file(input_path, output_path):
     """Cleans the CSV file by removing quotes and trailing semicolons."""
     try:
@@ -22,7 +21,6 @@ def clean_csv_file(input_path, output_path):
     except Exception as e:
         print(f"❌ Error: {e}")
 
-
 def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_path):
     """Enriches the CSV with Department and Location, adds a Summary sheet."""
     try:
@@ -36,9 +34,9 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         emp_df.columns = [col.strip().lower() for col in emp_df.columns]
         emp_df.rename(columns={'spendesk names': 'Payer'}, inplace=True)
 
-        if 'department' in emp_df.columns:
-            df = df.merge(emp_df[['Payer', 'department']], on='Payer', how='left')
-            df.insert(0, 'Department', df.pop('department'))
+        if 'netsuite department' in emp_df.columns:
+            df = df.merge(emp_df[['Payer', 'netsuite department']], on='Payer', how='left')
+            df.insert(0, 'Department', df.pop('netsuite department'))
         else:
             df.insert(0, 'Department', "")
 
@@ -46,10 +44,14 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         amount_col = [col for col in df.columns if 'signed total amount' in col.lower()]
         if amount_col:
             signed_col = amount_col[0]
+            # -----------------------------------------------
+            # -----------------------------------------------
+            # UPDATE VALUE OF £250 HERE
 
-            # change the value of £250 here if we decide to change what should be allocated to central location!!
             df.insert(1, 'Location', df[signed_col].apply(lambda x: "Central" if pd.to_numeric(x, errors='coerce') < 250 else ""))
             
+            # -----------------------------------------------
+            # -----------------------------------------------
         else:
             df.insert(1, 'Location', "")
 
@@ -60,8 +62,6 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         print(f"✓ Saved cleaned Excel to: {output_excel_path}")
 
         # === Create Summary Sheet ===
-
-        # Date info
         today = datetime.today()
         current_date_str = today.strftime('%d/%m/%Y')
         prev_month = today.month - 1 if today.month > 1 else 12
@@ -78,7 +78,6 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
             "POSTING PERIOD": posting_period
         }
 
-        # Reload Data sheet
         df = pd.read_excel(output_excel_path, sheet_name='Data')
 
         # Column mapping
@@ -91,13 +90,18 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
             print("❌ Could not find all required columns for summary sheet.")
             return
 
-        # Group by expense account number
-        grouped = df.groupby(expense_col).agg({
+        # Ensure blanks are consistent for grouping
+        df['Department'] = df['Department'].fillna("Unassigned")
+        df['Location'] = df['Location'].replace('', 'Blank').fillna("Blank")
+
+        # Group by Expense Account, Department, and Location
+        grouped = df.groupby([expense_col, 'Department', 'Location'], dropna=False).agg({
             net_col: 'sum',
             tax_col: 'sum',
             total_col: 'sum'
         }).reset_index()
         grouped.rename(columns={expense_col: 'Expense Account Number'}, inplace=True)
+
 
         # Lookup Display Name for each account
         acct_df = reference_sheets["Account"]
@@ -109,6 +113,8 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         summary_data = []
 
         for _, row in merged.iterrows():
+            tax_code = "VAT:S-GB" if row[tax_col] > 0 else "VAT:Z-GB"
+
             summary_data.append({
                 'REFERENCE': template_header['REFERENCE'],
                 'VENDOR': template_header['VENDOR'],
@@ -118,11 +124,11 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
                 'POSTING PERIOD': template_header['POSTING PERIOD'],
                 'ACCOUNT SPECIFIC': row['Display Name'] if pd.notna(row['Display Name']) else row['Expense Account Number'],
                 'AMOUNT': row[net_col],
-                'TAX CODE': '',
+                'TAX CODE': tax_code,
                 'TAX AMOUNT': row[tax_col],
                 'GROSS AMOUNT': row[total_col],
-                'DEPARTMENT': '',
-                'LOCATION': ''
+                'DEPARTMENT': row['Department'],
+                'LOCATION': row['Location']
             })
 
         summary_df = pd.DataFrame(summary_data)
@@ -131,11 +137,10 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         with pd.ExcelWriter(output_excel_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
             summary_df.to_excel(writer, sheet_name='Summary', index=False)
 
-        print("✓ Added 'Summary' sheet using Display Names.")
+        print("✓ Added 'Summary' sheet grouped by account, department, and location.")
 
     except Exception as e:
         print(f"❌ Error during Excel processing: {e}")
-
 
 def main():
     print("=== CSV Cleaner and Excel Generator ===")
@@ -156,7 +161,6 @@ def main():
         os.remove(temp_cleaned)
     except:
         print(f"Note: Could not remove temporary file: {temp_cleaned}")
-
 
 if __name__ == "__main__":
     main()
