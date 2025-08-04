@@ -26,10 +26,8 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
     try:
         df = pd.read_csv(input_csv_path, sep=';')
 
-        # === Load Reference Sheets ===
         reference_sheets = pd.read_excel(reference_excel_path, sheet_name=["Employee", "Account"])
 
-        # --- Employee Sheet (for Department) ---
         emp_df = reference_sheets["Employee"]
         emp_df.columns = [col.strip().lower() for col in emp_df.columns]
         emp_df.rename(columns={'spendesk names': 'Payer'}, inplace=True)
@@ -40,34 +38,36 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         else:
             df.insert(0, 'Department', "")
 
-        # --- Location (from Signed Total Amount) ---
         amount_col = [col for col in df.columns if 'signed total amount' in col.lower()]
         if amount_col:
             signed_col = amount_col[0]
-            # -----------------------------------------------
-            # -----------------------------------------------
-            # UPDATE VALUE OF £250 HERE
-
             df.insert(1, 'Location', df[signed_col].apply(lambda x: "Central" if pd.to_numeric(x, errors='coerce') < 250 else ""))
-            
-            # -----------------------------------------------
-            # -----------------------------------------------
         else:
             df.insert(1, 'Location', "")
 
-        # Save the enriched data
         with pd.ExcelWriter(output_excel_path, engine='openpyxl') as writer:
             df.to_excel(writer, sheet_name='Data', index=False)
 
-        print(f"✓ Saved cleaned Excel to: {output_excel_path}")
+        print(f"✓ Saved enriched Excel to: {output_excel_path}")
+        generate_summary_only(output_excel_path, reference_excel_path)
 
-        # === Create Summary Sheet ===
+    except Exception as e:
+        print(f"❌ Error during enrichment: {e}")
+
+def generate_summary_only(excel_path, reference_excel_path):
+    """Regenerates the Summary sheet based on the current Data sheet."""
+    try:
+        df = pd.read_excel(excel_path, sheet_name='Data')
+        reference_sheets = pd.read_excel(reference_excel_path, sheet_name=["Account"])
+        acct_df = reference_sheets["Account"]
+        acct_df.columns = [col.strip() for col in acct_df.columns]
+
         today = datetime.today()
         current_date_str = today.strftime('%d/%m/%Y')
         prev_month = today.month - 1 if today.month > 1 else 12
         prev_year = today.year if today.month > 1 else today.year - 1
         prev_month_str = datetime(prev_year, prev_month, 1).strftime('%b')
-        posting_period = f"{prev_month_str}-{str(prev_year)[-2:]}"  # e.g., "Jun-25"
+        posting_period = f"{prev_month_str}-{str(prev_year)[-2:]}"
 
         template_header = {
             "REFERENCE": f"Spendesk {posting_period}",
@@ -78,23 +78,18 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
             "POSTING PERIOD": posting_period
         }
 
-        df = pd.read_excel(output_excel_path, sheet_name='Data')
-
-        # Column mapping
         expense_col = next((col for col in df.columns if 'expense account' in col.lower()), None)
         net_col = next((col for col in df.columns if 'net amount' in col.lower()), None)
         tax_col = next((col for col in df.columns if 'tax amount' in col.lower()), None)
         total_col = next((col for col in df.columns if 'signed total amount' in col.lower()), None)
 
         if not all([expense_col, net_col, tax_col, total_col]):
-            print("❌ Could not find all required columns for summary sheet.")
+            print("❌ Required columns not found in data sheet.")
             return
 
-        # Ensure blanks are consistent for grouping
         df['Department'] = df['Department'].fillna("Unassigned")
         df['Location'] = df['Location'].replace('', 'Blank').fillna("Blank")
 
-        # Group by Expense Account, Department, and Location
         grouped = df.groupby([expense_col, 'Department', 'Location'], dropna=False).agg({
             net_col: 'sum',
             tax_col: 'sum',
@@ -102,19 +97,12 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
         }).reset_index()
         grouped.rename(columns={expense_col: 'Expense Account Number'}, inplace=True)
 
-
-        # Lookup Display Name for each account
-        acct_df = reference_sheets["Account"]
-        acct_df.columns = [col.strip() for col in acct_df.columns]
         lookup_df = acct_df[['Expense Account Number', 'Display Name']]
-
         merged = grouped.merge(lookup_df, on='Expense Account Number', how='left')
 
         summary_data = []
-
         for _, row in merged.iterrows():
             tax_code = "VAT:S-GB" if row[tax_col] > 0 else "VAT:Z-GB"
-
             summary_data.append({
                 'REFERENCE': template_header['REFERENCE'],
                 'VENDOR': template_header['VENDOR'],
@@ -133,34 +121,46 @@ def enrich_and_save_excel(input_csv_path, output_excel_path, reference_excel_pat
 
         summary_df = pd.DataFrame(summary_data)
 
-        # Append to Excel
-        with pd.ExcelWriter(output_excel_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+        with pd.ExcelWriter(excel_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
             summary_df.to_excel(writer, sheet_name='Summary', index=False)
 
-        print("✓ Added 'Summary' sheet grouped by account, department, and location.")
+        print("✓ Summary sheet regenerated successfully.")
 
     except Exception as e:
-        print(f"❌ Error during Excel processing: {e}")
+        print(f"❌ Error updating summary: {e}")
 
 def main():
-    print("=== CSV Cleaner and Excel Generator ===")
+    print("=== Spendesk Processor ===")
+    print("1. Run full process (clean, enrich, generate summary)")
+    print("2. Update summary only (from existing Excel)")
 
-    input_csv = input("Enter path to the CSV file: ").strip().strip('"').strip("'")
-    output_excel = input("Enter path to save Excel (.xlsx): ").strip().strip('"').strip("'")
-    ref_excel = input("Enter path to employee + account reference Excel file: ").strip().strip('"').strip("'")
+    choice = input("Choose an option (1 or 2): ").strip()
 
-    if not output_excel.endswith('.xlsx'):
-        output_excel += '.xlsx'
+    if choice == '1':
+        input_csv = input("Enter path to the CSV file: ").strip().strip('"').strip("'")
+        output_excel = input("Enter path to save Excel (.xlsx): ").strip().strip('"').strip("'")
+        ref_excel = input("Enter path to reference Excel file: ").strip().strip('"').strip("'")
 
-    temp_cleaned = input_csv.rsplit('.', 1)[0] + '_cleaned.csv'
+        if not output_excel.endswith('.xlsx'):
+            output_excel += '.xlsx'
 
-    clean_csv_file(input_csv, temp_cleaned)
-    enrich_and_save_excel(temp_cleaned, output_excel, ref_excel)
+        temp_cleaned = input_csv.rsplit('.', 1)[0] + '_cleaned.csv'
 
-    try:
-        os.remove(temp_cleaned)
-    except:
-        print(f"Note: Could not remove temporary file: {temp_cleaned}")
+        clean_csv_file(input_csv, temp_cleaned)
+        enrich_and_save_excel(temp_cleaned, output_excel, ref_excel)
+
+        try:
+            os.remove(temp_cleaned)
+        except:
+            print(f"Note: Could not remove temporary file: {temp_cleaned}")
+
+    elif choice == '2':
+        excel_path = input("Enter path to existing Excel file: ").strip().strip('"').strip("'")
+        ref_excel = input("Enter path to reference Excel file: ").strip().strip('"').strip("'")
+        generate_summary_only(excel_path, ref_excel)
+
+    else:
+        print("❌ Invalid option. Please enter 1 or 2.")
 
 if __name__ == "__main__":
     main()
