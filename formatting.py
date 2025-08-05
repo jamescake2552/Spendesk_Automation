@@ -71,8 +71,9 @@ def generate_summary_only(excel_path, reference_excel_path):
 
         template_header = {
             "REFERENCE": f"Spendesk {posting_period}",
+            "EXTERNAL ID": f"Spendesk {posting_period}",
             "VENDOR": "Spendesk",
-            "ACCOUNT GENERAL": "20001 Accounts Payable: Trade Creditors",
+            "ACCOUNT": "111",
             "MEMO": f"Spendesk {posting_period}",
             "DATE": current_date_str,
             "POSTING PERIOD": posting_period
@@ -105,12 +106,13 @@ def generate_summary_only(excel_path, reference_excel_path):
             tax_code = "VAT:S-GB" if row[tax_col] > 0 else "VAT:Z-GB"
             summary_data.append({
                 'REFERENCE': template_header['REFERENCE'],
+                'EXTERNAL ID': template_header['EXTERNAL ID'],
                 'VENDOR': template_header['VENDOR'],
-                'ACCOUNT GENERAL': template_header['ACCOUNT GENERAL'],
+                'ACCOUNT': template_header['ACCOUNT'],
                 'MEMO': template_header['MEMO'],
                 'DATE': template_header['DATE'],
                 'POSTING PERIOD': template_header['POSTING PERIOD'],
-                'ACCOUNT SPECIFIC': row['Display Name'] if pd.notna(row['Display Name']) else row['Expense Account Number'],
+                'INTERNAL ID': row['Display Name'] if pd.notna(row['Display Name']) else row['Expense Account Number'],
                 'AMOUNT': row[net_col],
                 'TAX CODE': tax_code,
                 'TAX AMOUNT': row[tax_col],
